@@ -1,0 +1,574 @@
+rm -f /etc/udev/rules.d/70-persistent-net.rules
+
+ensure network script files have only following:
+vi /etc/sysconfig/network-scripts/ifcfg-enp0s8
+TYPE=Ethernet
+BOOTPROTO=dhcp
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=yes
+NAME=enp0s8
+DEVICE=enp0s8
+ONBOOT=yes
+
+
+
+yum groupinstall "Development Tools" "Development Librarys" -y
+yum install dkms bzip2 perl rpm-build redhat-rpm-config asciidoc hmaccalc perl-ExtUtils-Embed pesign xmlto audit-libs-devel binutils-devel elfutils-devel elfutils-libelf-devel ncurses-devel newt-devel numactl-devel pciutils-devel python-devel zlib-devel net-tools wget ping telnet ntpdate yum-utils python-setuptools gcc python-cryptography epel-release screen traceroute bind-utils gcc kernel-devel kernel-headers make -y
+
+echo $KERN_DIR
+export KERN_DIR=/usr/src/kernels/$(uname -r)
+echo $KERN_DIR
+yum update -y
+yum upgrade -y
+mkdir virboxaddon
+mount /dev/sr0 virboxaddon/
+cd virboxaddon
+./VBoxLinuxAdditions.run
+
+
+systemctl stop postfix firewalld NetworkManager
+systemctl disable postfix firewalld NetworkManager
+systemctl mask NetworkManager
+yum remove postfix NetworkManager NetworkManager-libnm -y
+
+systemctl enable network
+systemctl start network
+
+Completely disable Selinux policy on the machine by issuing the below commands. 
+Also edit  /etc/selinux/config file and set SELINUX line from enforcing to permissive
+setenforce 0
+getenforce
+vi /etc/selinux/config
+SELINUX=permissive
+
+sshd for root login
+OpenStack’s install script requires root access for ssh login. To setup ssh:
+# vi /etc/ssh/sshd_config
+PermitRootLogin yes
+# systemctl enable sshd.service
+# systemctl start sshd.service
+
+=================================================================================================================================================================
+
+yum install -y https://rdoproject.org/repos/rdo-release.rpm
+yum install -y centos-release-openstack-queens epel-release openstack-utils
+yum install -y openstack-packstack
+yum-config-manager --enable openstack-queens
+yum update -y
+
+yum install -y https://rdoproject.org/repos/rdo-release.rpm
+yum install -y centos-release-openstack-pike epel-release openstack-utils
+yum install -y openstack-packstack
+yum-config-manager --enable openstack-pike
+yum update -y
+
+yum install -y https://rdoproject.org/repos/rdo-release.rpm
+yum -y install centos-release-openstack-ocata epel-release openstack-utils
+yum -y install openstack-packstack
+yum-config-manager --enable openstack-ocata
+yum update -y
+
+yum install -y https://rdoproject.org/repos/rdo-release.rpm
+yum -y install centos-release-openstack-newton epel-release openstack-utils
+yum -y install openstack-packstack
+yum update -y
+
+
+
+install packstack from git
+$ git clone --recursive git://github.com/stackforge/packstack.git
+$ cd packstack
+$ ./bin/packstack --allinone --os-neutron-install=y --provision-demo=n --provision-all-in-one-ovs-bridge=n
+
+
+
+
+yum-config-manager --enable openstack-pike
+
+yum-config-manager --enable openstack-ocata
+
+yum-config-manager --enable openstack-newton
+
+
+# yum install http://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm
+# yum install http://rdo.fedorapeople.org/openstack-kilo/rdo-release-kilo.rpm
+
+
+=================================================================================================================================================================
+
+hostnamectl set-hostname cloud.centos.lan
+
+packstack --gen-answer-file CentOS7-minimal-OpenstackPike-WIFI-answers.txt
+
+packstack --answer-file CentOS7-minimal-OpenstackPike-WIFI-answers.txt
+
+packstack --gen-answer-file CentOS7-minimal-OpenstackPike-Loopback-answers.txt
+
+packstack --gen-answer-file CentOS7-minimal-OpenstackPike-Hostname-answers.txt
+
+
+
+
+packstack --allinone
+packstack --allinone --provision-demo=n --provision-all-in-one-ovs-bridge=n
+
+
+
+packstack --gen-answer-file CentOS7-minimal-OpenstackNewton-Loopback-answers.txt
+
+packstack --answer-file CentOS7-minimal-OpenstackNewton-Loopback-answers.txt
+
+
+=================================================================================================================================================================
+
+
+
+/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini:
+
+
+
+
+
+
+
+
+With Neutron:
+
+No floating IPs are created by default. You must first create a public network and subnet, defining the IP address range for floating IPs at that time.
+
+source /root/keystonerc_admin
+neutron net-create public --router:external
+neutron subnet-create public 192.168.1.0/24 --name vlan --enable_dhcp=False --allocation_pool start=192.168.1.57,end=192.168.1.62 --gateway 192.168.1.1 (use your network gateway here - change the IP addresses in the allocation range to match what is available on your network)
+neutron router-create router1 (router1 has to be replaced by the name of your router)
+neutron router-gateway-set $router_id $vlan_id (use your router id and previous created vlan id)
+neutron floatingip-create public (repeat as necessary)
+Neutron does not auto-create floating IPs or auto-assign them to new instances but this feature is planned for future inclusion.
+
+
+
+=================================================================================================================================================================
+
+
+
+Neutron with existing external network
+Many people have asked how to use packstack –allinone with an existing external network. This method should allow any machine on the network to be able to access launched instances via their floating IPs. Also, at the end of this message, there are some ideas for making this process better that I thought we could discuss.
+
+These instructions have been tested on Centos 7.
+
+Initially, follow the Quickstart but stop when you see the first "packstack –allinone" at Step 3, instead do:
+
+# packstack --allinone --provision-demo=n --os-neutron-ovs-bridge-mappings=extnet:br-ex --os-neutron-ovs-bridge-interfaces=br-ex:eth0 --os-neutron-ml2-type-drivers=vxlan,flat
+This will define a logical name for our external physical L2 segment as "extnet". Later we will reference to our provider network by the name when creating external networks.
+
+The command also adds 'flat' network type to the list of types supported by the installation. This is needed when your provider network is a simple flat network (the most common setup for PoCs). If you use a VLAN segment for external connectivity, you should add 'vlan' to the list of type drivers.
+
+Note: the command is currently broken for Mitaka: https://bugzilla.redhat.com/show_bug.cgi?id=1316856, please skip –os-neutron-ovs-bridge-interfaces=br-ex:eth0 argument for now.
+
+(There's an alternate method using packstack –allinone –provision-all-in-one-ovs-bridge=n, but it's more complicated)
+
+After completion, given a single machine with a current IP of 192.168.122.212/24 via DHCP with gateway of 192.168.122.1:
+
+Make /etc/sysconfig/network-scripts/ifcfg-br-ex resemble:
+
+DEVICE=br-ex
+DEVICETYPE=ovs
+TYPE=OVSBridge
+BOOTPROTO=static
+IPADDR=192.168.122.212 # Old eth0 IP since we want the network restart to not 
+                       # kill the connection, otherwise pick something outside your dhcp range
+NETMASK=255.255.255.0  # your netmask
+GATEWAY=192.168.122.1  # your gateway
+DNS1=192.168.122.1     # your nameserver
+ONBOOT=yes
+The file above will move the network parameters from eth0 to br-ex.
+
+Make /etc/sysconfig/network-scripts/ifcfg-eth0 resemble (no BOOTPROTO!):
+
+Note: if on Centos7, the file could be /etc/sysconfig/network-scripts/ifcfg-enp2s0 and DEVICE should be enp2s0
+
+DEVICE=eth0
+TYPE=OVSPort
+DEVICETYPE=ovs
+OVS_BRIDGE=br-ex
+ONBOOT=yes
+It is also possible to use a bond. In that case /etc/sysconfig/network-scripts/ifcfg-bond0 may look like this:
+
+DEVICE=bond0
+DEVICETYPE=ovs
+TYPE=OVSPort
+OVS_BRIDGE=br-ex
+ONBOOT=yes
+BONDING_MASTER=yes
+BONDING_OPTS="mode=802.3ad"
+This means, we will bring up the interface and plug it into br-ex OVS bridge as a port, providing the uplink connectivity.
+
+Restart the network service
+
+# reboot
+or, alternatively:
+
+# service network restart
+Now, create the external network with Neutron.
+
+# . keystonerc_admin
+# neutron net-create external_network --provider:network_type flat --provider:physical_network extnet  --router:external
+Please note: "extnet" is the L2 segment we defined with –os-neutron-ovs-bridge-mappings above.
+
+You need to create a public subnet with an allocation range outside of your external DHCP range and set the gateway to the default gateway of the external network.
+
+Please note: 192.168.122.1/24 is the router and CIDR we defined in /etc/sysconfig/network-scripts/ifcfg-br-ex for external connectivity.
+
+# neutron subnet-create --name public_subnet --enable_dhcp=False --allocation-pool=start=192.168.122.10,end=192.168.122.20 \
+                        --gateway=192.168.122.1 external_network 192.168.122.0/24
+Get a cirros image, not provisioned without demo provisioning:
+
+curl http://download.cirros-cloud.net/0.3.4/cirros-0.3.4-x86_64-disk.img | glance \
+         image-create --name='cirros image' --visibility=public --container-format=bare --disk-format=qcow2
+That's all you need to do from admin perspective to allow your users to connect their private networks to the outside world. Now let's switch to the user.
+
+Since you haven't created a user yet:
+
+openstack project create --enable internal
+openstack user create --project internal --password foo --email bar@corp.com --enable internal
+Now, let's switch to the newly created user:
+
+# export OS_USERNAME=internal
+# export OS_TENANT_NAME=internal
+# export OS_PASSWORD=foo
+Then create a router and set its gateway using the external network created by the admin in one of previous steps:
+
+# neutron router-create router1
+# neutron router-gateway-set router1 external_network
+Now create a private network and a subnet in it, since demo provisioning has been disabled:
+
+# neutron net-create private_network
+# neutron subnet-create --name private_subnet private_network 192.168.100.0/24
+Finally, connect your new private network to the public network through the router, which will provide floating IP addresses.
+
+# neutron router-interface-add router1 private_subnet
+Easiest way to the network and to launch instances is via horizon, which was set up by packstack.
+
+
+
+
+$ ovs-vsctl br-set-external-id br-ex bridge-id br-ex
+$ service neutron-openvswitch-agent restart
+$ neutron agent-list
+$ nova service-list
+
+
+
+$ neutron net-create --provider:network_type flat \
+                     --provider:physical_network extnet \
+                     --router:external \
+                     --shared \
+                     external_network
+$ neutron subnet-create --name public_subnet \
+                        --enable_dhcp=False \
+                        --allocation-pool start=10.1.100.16,end=10.1.100.20 \
+                        --gateway=10.1.100.1 external_network 10.1.100.0/23
+$ neutron net-create private_network
+$ neutron subnet-create --name private_subnet \
+                        --allocation-pool start=10.10.1.100,end=10.10.1.200 \
+                        --gateway=10.10.1.1 private_network 10.10.1.0/24
+$ neutron router-create router1
+$ neutron router-interface-add router1 private_subnet
+$ neutron router-gateway-set router1 external_network
+
+
+
+
+
+$ nova secgroup-create all "Allow all tcp ports"
+$ nova secgroup-add-rule all TCP 1 65535 0.0.0.0/0
+$ nova secgroup-create base "Allow Base Access"
+$ nova secgroup-add-rule base TCP 22 22 0.0.0.0/0
+$ nova secgroup-add-rule base TCP 80 80 0.0.0.0/0
+$ nova secgroup-add-rule base ICMP -1 -1 0.0.0.0/0
+$ nova secgroup-list-rules base
+
+
+
+
+$ ovs-vsctl show
+$ ovs-vsctl list-br
+$ ovs-vsctl list-ports br-ex # => e.g., em1, phy-br-ex, qg-20ffa8ce-2f
+$ ovs-ofctl dump-flows br-ex
+$ ovs-ofctl dump-ports br-ex
+$ ovs-ofctl show br-int
+$ ovs-vsctl list bridge
+$ ovs-vsctl list port
+$ ovs-vsctl list interface
+
+
+
+
+
+ovs-appctl fdb/show br-int
+
+ovsdb-tool show-log | grep ${INSTANCE_ID}
+
+
+
+Before import image[s] and creating instances, there is one thing left to do : instruct dhcp_agent that metadata for cloud-init inside the VM will not be served from traditional "router" inside of openstack. And also don't forget to let traffic (in/out) pass through security group (see doc)
+
+Just be sure to have enable_isolated_metadata = True in /etc/neutron/dhcp_agent.ini and then systemctl restart neutron-dhcp-agent : and from that point, cloud metadata will be served from dhcp too.
+
+From that point you can just follow the quickstart guide to create projects/users, import images, create instances and/or do all this from cli too 
+
+
+
+
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+
+
+
+
+
+
+================================================================================================================================================================
+
+
+two network
+wifi bridge configured to have dhcp
+
+
+install packstack on 127.0.0.1
+
+
+. /root/keystonerc_admin
+openstack domain create --description "ParthoSirDomain" parthosirdom
+openstack project create --domain parthosirdom --description "Partho Sir Admin Project" parthosiradm
+openstack user create --domain parthosirdom --password-prompt admin
+
+neutron net-create private-1
+neutron net-create private-2
+
+neutron subnet-create private-1 --name private_subnet-1a --allocation-pool start=10.10.0.2,end=10.10.0.62 10.10.0.0/26
+neutron subnet-create private-1 --name private_subnet-1b --allocation-pool start=10.10.0.66,end=10.10.0.126 10.10.0.64/26
+
+neutron subnet-create private-2 --name private_subnet-2a --allocation-pool start=10.10.0.130,end=10.10.0.190 10.10.0.128/26
+neutron subnet-create private-2 --name private_subnet-2b --allocation-pool start=10.10.0.194,end=10.10.0.198 10.10.0.192/29
+
+neutron net-create public-1 --provider:network_type flat --provider:physical_network extnet --router:external
+neutron subnet-create public-1 --name public_subnet-1 --allocation-pool start=192.168.1.150,end=192.168.1.160 --disable-dhcp=false --gateway 192.168.1.1 192.168.1.0/24
+
+neutron router-create router1 --ha False
+neutron router-gateway-set router1 public
+neutron router-interface-add router1 private_subnet
+
+
+
+ovs-vsctl show
+ovs-vsctl list-br
+ovs-vsctl list-ports br-ex
+neutron net-list
+neutron net-show
+
+
+# neutron subnet-create private --name private_subnet --allocation-pool start=10.10.1.100,end=10.10.1.200 10.10.1.0/24
+# neutron net-create public --provider:network_type flat --provider:physical_network extnet --router:external
+# neutron subnet-create public --name public_subnet --allocation-pool start=192.168.0.100,end=192.168.0.200 --disable-dhcp --gateway 192.168.0.1 192.168.0.0/24
+
+neutron net-create external1  --router:external=True  --provider:network_type=flat  --provider:physical_network=physnet1
+neutron subnet-create --name external1-subnet --disable-dhcp external1 172.16.0.0/26 --allocation-pool start=172.16.0.2,end=172.16.0.62
+neutron net-create external2-shared --shared --router:external=True --provider:network_type=flat --provider:physical_network=physnet2   
+neutron subnet-create external2-shared --name external2-shared-subnet --allocation-pool start=172.16.0.66,end=172.16.0.126  --gateway 172.16.0.65 172.16.0.64/26
+ 
+ 
+
+ 
+neutron net-create external1  --router:external=True  --provider:network_type=flat  --provider:physical_network=ext-net-enp0s8
+neutron subnet-create --name external1-subnet --disable-dhcp external1 192.168.1.0/24 --allocation-pool start=192.168.1.150,end=192.168.1.160 --gateway 192.168.1.1
+
+
+
+
+
+
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+
+
+
+
+
+
+arp
+
+
+ovs-ofctl dump-flows br-tun
+ovs-ofctl dump-flows br-int
+ovs-ofctl dump-flows br-ex
+ovs-ofctl dump-flows br-tun table=22
+
+
+tcpdump -n -e -ttt -i br-ex | grep "10.20.0.54"
+
+tcpdump -i br-ex | grep "10.20.0.54"
+
+
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+=================================================================================================================================================================
+
+
+The problem turned out to be that udev was renaming "eth1" to "br-ex" which meant that eth1 couldn't be set into promiscuous mode. Fixing this (in /etc/udev/rules.d/70-persistent-net.rules) cured the problem.
+
+
+By default, the router in this model prevents routing between private networks that are part of the same tenant: VM instances within one private network cannot communicate with VM instances in another private network, even though they are all part of the same tenant. To change this behavior, set allow_forwarding_between_networks to True in the /etc/neutron/l3_agent.ini configuration file and restart the neutron-l3-agent SMF service.
+
+
+Enable IP forwarding on the entire host.
+network# ipadm set-prop -p forwarding=on ipv4
+network# ipadm set-prop -p forwarding=on ipv6
+
+
+
+iptables -A POSTROUTING -t mangle -p udp --dport 68 -j CHECKSUM --checksum-fill
+
+
+
+
+
+
+Managed to find the answer to manipulate the l3-route-agent for my NAT rules.
+
+ip netns exec qrouter-0deb1b8e-f856-4045-818e-405807936f5b iptables -t nat -A neutron-l3-agent-OUTPUT -d 10.11.179.63/32 -j DNAT --to-destination 192.168.111.150
+
+ip netns exec qrouter-0deb1b8e-f856-4045-818e-405807936f5b iptables -t nat -A neutron-l3-agent-PREROUTING -d 10.11.179.63/32 -j DNAT --to-destination 192.168.111.150
+
+ip netns exec qrouter-0deb1b8e-f856-4045-818e-405807936f5b iptables -t nat -A neutron-l3-agent-float-snat -s 192.168.111.150/32 -j SNAT --to-source 10.11.179.63
+
+ip netns exec qrouter-0deb1b8e-f856-4045-818e-405807936f5b ip addr add 10.11.179.63/32 brd 10.11.179.63 dev qg-b2e3c286-b2
+
+
+
+
+
+Can you post the output of "neutron net-list", "neutron router-list", and "neutron router-port-list <router_id>"?
+
+
+
+
+ip netns exec qrouter-4b6c0922-d9f9-4f4d-b28d-be4f5c82a769 iptables -t nat -nvL
+
+
+
+ip netns exec qrouter-0f8b3d03-b229-4e86-8469-225648ea0b42 iptables -t nat -S | grep SNAT
+
+
+
+https://ajo.es/neutron-external-network-with-routing/
+
+ip route add 10.222.0.0/16 via 192.168.1.102
+
+
+
+=================================================================================================================================================================
+
+https://albertomolina.wordpress.com/2015/11/22/playing-around-with-openstack-using-an-instance-as-router/
+
+Bringing up the interface eth1 (ifup eth1), the routing table shows the expected rules (the rule related to the metadata server doesn’t appear anymore because it’s provided by the DHCP server of the isolated network):
+
+default via 10.0.0.1 dev eth0 
+10.0.0.0/24 dev eth0  proto kernel  scope link  src 10.0.0.230 
+10.0.1.0/24 dev eth1  proto kernel  scope link  src 10.0.1.10
+
+
+This linux box is going to work as a router (for now only IPv4), so let’s activate the forwarding bit:
+
+linuxrouter:~$ sudo sed -i '/^#net.ipv4.ip\_forward/s/^#//g' /etc/sysctl.conf
+linuxrouter:~$ sudo sysctl -p /etc/sysctl.conf
+
+
+many other configs still available .... check the url in this block
+
+=================================================================================================================================================================
+
+
+
+do ping and then do tcp dump
+sudo tcpdump -i eth1 icmp
+
+
+sudo iptables -L neutron-openvswi-sebf586a5-a -n -v
+
+
+The ping request arrives to eth1 in linuxrouter (first line captured), it sends it to 10.0.0.1 (external router), the external router is able to reply to the internal instance through linuxrouter (thanks to the static routing rule defined) and finally the reply from 10.0.0.1 goes out linuxrouter (last line captured), but it never arrives to the internal instance. This is due to the OpenStack anti-spoofing iptables rules that are automatically added to every instance launched and they can be verified running this command in the compute node where the instance is running:
+
+compute1:~$ sudo iptables -L neutron-openvswi-sebf586a5-a -n -v
+Chain neutron-openvswi-sebf586a5-a (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+   47  3072 RETURN     all  --  *      *       10.0.1.10            0.0.0.0/0            MAC FA:16:3E:42:A1:C4
+    3   252 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0
+Where “ebf586a5-a” is the truncated neutron port UUID (10 digits) corresponding to eth1. For every instance launched, neutron defines a chain neutron-openvswi-s<truncated-UUID> and all the outgoing traffic with an source IP address different to the one defined to the instance (10.0.1.10 in this case) is dropped.
+
+
+
+sudo ip netns exec qrouter-5c41b22f-a874-4689-8b93-e82640541929 iptables -t nat -L | grep redir
+sudo ip netns exec qrouter-5c41b22f-a874-4689-8b93-e82640541929 netstat -atp 
+Active Internet connections (servers and established) 
+Proto Recv-Q Send-Q Local Address Foreign Address State PID/Program name 
+tcp 0 0 *:9697 *:* LISTEN 7753/python
+
+
+
+In the l3_agent.ini file, configure the layer-3 agent.
+
+[DEFAULT]
+interface_driver = linuxbridge
+external_network_bridge =
+
+
+https://docs.openstack.org/neutron/pike/admin/deploy-lb-selfservice.html
+
+
+
+
+
+
+**************************************8
+https://opensource.com/article/17/4/openstack-neutron-networks
+
+
+
+
+
+
+
+
+iptables-save | grep neutron_server
+    -A INPUT -s 192.168.1.127/32 -p tcp -m multiport --dports 9696 -m comment --comment "001 neutron server incoming neutron_server_192.168.1.127_192.168.1.127" -j ACCEPT
+    -A INPUT -s 192.168.1.137/32 -p tcp -m multiport --dports 9696 -m comment --comment "001 neutron server incoming neutron_server_192.168.1.127_192.168.1.137" -j ACCEPT
+	
+
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE	
+iptables -t nat -A POSTROUTING -s $private/32 -j SNAT --to-source $public
+iptables -t nat -A PREROUTING  -d $public/32 -j DNAT --to-destination $private
+
+
+
+ip netns exec qrouter-[uuid] ssh cirros@192.168.0.10
+
+
+
+
+
+
+https://ask.openstack.org/en/question/8891/external-network-only-works-for-routers/
+I have the same problem. If you look deeper at the ovsctl configuration you will see that the instance VM_1 and VM_2 which are created in "external" network are placed in the br-int bridge. Only a openstack router is placed automatically in the br-ex. there is a way to manually change the binding of the "tap" interfaces, delete them from b-int and place int br-ex: ovs-vsctl del-port br-int tap5f0258a8-85 ovs-vsctl add-port br-ex tap5f0258a8-85
+
+
+
+
+
+
